@@ -1,12 +1,21 @@
 require 'json'
 require 'sequel'
 
+DO_DROP = true
+
+
 DB = Sequel.connect('jdbc:mysql://localhost/kiva?user=root')
 
-DB.drop_table?(:lender)
-DB.drop_table?(:loan)
-DB.drop_table?(:description)
-DB.drop_table?(:payment)
+if DO_DROP
+  DB.drop_table?(:lender)
+  DB.drop_table?(:loan)
+  DB.drop_table?(:description)
+  DB.drop_table?(:payment)
+  DB.drop_table?(:local_payment)
+  DB.drop_table?(:scheduled_payment)
+  DB.drop_table?(:terms)
+  DB.drop_table?(:borrower)
+end
 
 DB.create_table?(:lender) do
   column :lender_id,          String, :primary_key => true, :index => true
@@ -74,6 +83,47 @@ DB.create_table?(:payment) do
   column :comment,                       String
 end
 
+DB.create_table?(:local_payment) do
+  primary_key :id
+  column :terms_id,                      Integer, :index => true
+
+  column :due_date,                      DateTime
+  column :amount,                        BigDecimal, :size=>[10, 2]
+end
+
+DB.create_table?(:scheduled_payment) do
+  primary_key :id
+  column :terms_id,                      Integer, :index => true
+
+  column :due_date,                      DateTime
+  column :amount,                        BigDecimal, :size=>[10, 2]
+end
+
+DB.create_table?(:terms) do
+  primary_key :id
+  column :loan_id,                       Integer, :index => true
+
+  column :disbursal_date,                                 DateTime
+  column :disbursal_currency,                             String
+  column :disbursal_amount,                               BigDecimal, :size=>[10, 2]
+  column :repayment_interval,                             String
+  column :repayment_term,                                 Integer
+  column :loan_amount,                                    BigDecimal, :size=>[10, 2]
+  column :loss_liability_nonpayment,                      String
+  column :loss_liability_currency_exchange,               String
+  column :loss_liability_currency_exchange_coverage_rate, BigDecimal
+end
+
+DB.create_table?(:borrower) do
+  primary_key :id
+  column :loan_id,        Integer, :index => true
+
+  column :first_name,     String
+  column :last_name,      String
+  column :gender,         String
+  column :pictured,       TrueClass, :default=>false
+end
+
 #########################################################################################################
 
 class Lender < Sequel::Model(:lender)
@@ -91,6 +141,17 @@ class Payment < Sequel::Model(:payment)
   unrestrict_primary_key
 end
 
+class LocalPayment < Sequel::Model(:local_payment)
+end
+
+class ScheduledPayment < Sequel::Model(:scheduled_payment)
+end
+
+class Terms < Sequel::Model(:terms)
+end
+
+class Borrower < Sequel::Model(:borrower)
+end
 
 #########################################################################################################
 
@@ -104,14 +165,14 @@ def process_lender(lender)
          :loan_because, :occupational_info, :loan_count, :invitee_count, :inviter_id
       model[key] = value.to_s
     when :image
-      value.each do |ikey, ivalue|
-        case ikey
+      value.each do |key2, value2|
+        case key2
         when :id
-          model[:image_id] = ivalue.to_s
+          model[:image_id] = value2.to_s
         when :template_id
-          model[:image_template_id] = ivalue.to_s
+          model[:image_template_id] = value2.to_s
         else
-          raise "unexpected key: #{ikey.to_s}"
+          raise "unexpected key: #{key2.to_s}"
         end
       end
     else
@@ -136,20 +197,22 @@ def process_loan(loan)
       model[key] = value.to_s
 
     when :image
-      value.each do |ikey, ivalue|
-        case ikey
-        when :id
-          model[:image_id] = ivalue.to_s
-        when :template_id
-          model[:image_template_id] = ivalue.to_s
+      value.each do |key2, value2|
+        case key2
+        when :id, :template_id
+          model[("image_"+key2.to_s).to_sym] = value2.to_s
         else
-          raise "unexpected key: #{ikey} in #{key}"
+          raise "unexpected key: #{key2} in #{key}"
         end
       end
     when :description
       create_description(value, model[:id])
     when :payments
       create_payments(value, model[:id])
+    when :terms
+      create_terms(value, model[:id])
+    when :borrowers
+      create_borrowers(value, model[:id])
     else
       # raise "unexpected key: #{key}"
     end
@@ -163,8 +226,8 @@ def create_description(descriptions, loan_id)
   descriptions.each do |key, value|
     case key
     when :texts
-      value.each do |ikey, ivalue|
-        LoanDescription.new(:loan_id => loan_id, :language => ikey.to_s, :text => ivalue.to_s).save
+      value.each do |key2, value2|
+        LoanDescription.new(:loan_id => loan_id, :language => key2.to_s, :text => value2.to_s).save
       end
     when :languages
       # ignore
@@ -190,6 +253,79 @@ def create_payments(payments, loan_id)
   end
 end
 
+def create_local_payments(payments, terms_id)
+  payments.each do |payment|
+    model = LocalPayment.new(:terms_id => terms_id)
+    payment.each do |key, value|
+      case key
+      when :due_date, :amount
+        model[key] = value.to_s
+      else
+        raise "unexpected key: #{key} in local_payment #{payment}"
+      end
+    end
+    model.save
+  end
+end
+
+def create_scheduled_payments(payments, terms_id)
+  payments.each do |payment|
+    model = ScheduledPayment.new(:terms_id => terms_id)
+    payment.each do |key, value|
+      case key
+      when :due_date, :amount
+        model[key] = value.to_s
+      else
+        raise "unexpected key: #{key} in scheduled_payment #{payment}"
+      end
+    end
+    model.save
+  end
+end
+
+def create_terms(terms, loan_id)
+  # eager save to generate autoincrement :id used below
+  model = Terms.new(:loan_id => loan_id).save
+  terms.each do |key, value|
+    case key
+    when :disbursal_date, :disbursal_currency, :disbursal_amount, :repayment_interval,
+         :repayment_term, :loan_amount
+      model[key] = value.to_s
+    when :local_payments
+      create_local_payments(value, model[:id])
+    when :scheduled_payments
+      create_scheduled_payments(value, model[:id])
+    when :loss_liability
+      value.each do |key2, value2|
+        case key2
+        when :nonpayment, :currency_exchange, :currency_exchange_coverage_rate
+          model[("loss_liability_"+key2.to_s).to_sym] = value2.to_s
+        else
+          raise "unexpected key: #{key2} in #{key} in terms"
+        end
+      end
+    else
+      raise "unexpected key: #{key} in description"
+    end
+  end
+  model.save
+end
+
+def create_borrowers(borrowers, loan_id)
+  borrowers.each do |borrower|
+    model = Borrower.new(:loan_id => loan_id)
+    borrower.each do |key, value|
+      case key
+      when :first_name, :last_name, :gender, :pictured
+        model[key] = value.to_s
+      else
+        raise "unexpected key: #{key} in borrower"
+      end
+    end
+    model.save
+  end
+end
+
 =begin
 
     {
@@ -204,40 +340,6 @@ end
         }
       },
 
-      "borrowers": [
-        {
-          "first_name": "Anonymous",
-          "last_name": "",
-          "gender": "M",
-          "pictured": true
-        }
-      ],
-
-      "terms": {
-        "disbursal_date": "2010-10-22T07:00:00Z",
-        "disbursal_currency": "PEN",
-        "disbursal_amount": 2000,
-        "repayment_interval": "Monthly",
-        "repayment_term": 14,
-        "loan_amount": 725,
-        "local_payments": [
-          {
-            "due_date": "2010-11-22T08:00:00Z",
-            "amount": 137.46
-          },
-        ],
-        "scheduled_payments": [
-          {
-            "due_date": "2011-12-01T08:00:00Z",
-            "amount": 71.12
-          }
-        ],
-        "loss_liability": {
-          "nonpayment": "lender",
-          "currency_exchange": "shared",
-          "currency_exchange_coverage_rate": 0.2
-        }
-      },
       "journal_totals": {
         "entries": 0,
         "bulkEntries": 00
