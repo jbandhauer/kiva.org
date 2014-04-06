@@ -86,7 +86,7 @@ DB.create_table?(:payment) do
   column :settlement_date,               DateTime
   column :rounded_local_amount,          BigDecimal, :size=>[10, 2]
   column :currency_exchange_loss_amount, BigDecimal
-  column :comment,                       String
+  column :comment,                       String, :text=>true
 end
 
 DB.create_table?(:local_payment) do
@@ -452,6 +452,8 @@ def process_files(type, pattern)
   count
 end
 
+#########################################################################################################
+
 # count = process_file(:lenders, "data/lenders/500.json")
 # count = process_files(:lenders, "data/lenders/50*.json")
 
@@ -459,7 +461,12 @@ end
 # count = process_files(:loans, "data/loans/50*.json")
 
 # count = process_file(:loans_lenders, "data/loans_lenders/50.json")
-count = process_files(:loans_lenders, "data/loans_lenders/5*.json")
+# count = process_files(:loans_lenders, "data/loans_lenders/5*.json")
+
+count = 0
+count += process_files(:loans, "data/loans/*.json")
+count += process_files(:lenders, "data/lenders/*.json")
+count += process_files(:loans_lenders, "data/loans_lenders/*.json")
 
 
 puts "total_items: #{count}"
