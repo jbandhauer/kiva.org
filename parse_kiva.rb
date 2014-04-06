@@ -199,10 +199,8 @@ def process_lenders(lender)
     when :image
       value.each do |key2, value2|
         case key2
-        when :id
-          model[:image_id] = value2.to_s
-        when :template_id
-          model[:image_template_id] = value2.to_s
+        when :id, :template_id
+          model[(key.to_s+'_'+key2.to_s).to_sym] = value2.to_s
         else
           raise "unexpected key: #{key2.to_s}"
         end
@@ -225,9 +223,7 @@ def process_loans(loan)
     when :id, :name, :status, :funded_amount, :basket_amount, :paid_amount, :video, :activity, :sector,
          :theme, :use, :delinquent, :partner_id, :posted_date, :planned_expiration_date, :loan_amount,
          :lender_count, :currency_exchange_loss_amount, :bonus_credit_eligibility, :funded_date, :paid_date
-
       model[key] = value.to_s
-
     when :image
       value.each do |key2, value2|
         case key2
@@ -373,7 +369,7 @@ def create_terms(terms, loan_id)
       value.each do |key2, value2|
         case key2
         when :nonpayment, :currency_exchange, :currency_exchange_coverage_rate
-          model[("loss_liability_"+key2.to_s).to_sym] = value2.to_s
+          model[(key.to_s+'_'+key2.to_s).to_sym] = value2.to_s
         else
           raise "unexpected key: #{key2} in #{key} in terms"
         end
