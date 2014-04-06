@@ -15,6 +15,8 @@ if DO_DROP
   DB.drop_table?(:scheduled_payment)
   DB.drop_table?(:terms)
   DB.drop_table?(:borrower)
+  DB.drop_table?(:location)
+  DB.drop_table?(:loan_lender)
 end
 
 DB.create_table?(:lender) do
@@ -46,7 +48,7 @@ DB.create_table?(:loan) do
   column :activity,                      String
   column :sector,                        String
   column :theme,                         String
-  column :use,                           String
+  column :use,                           String, :text=>true
   column :delinquent,                    TrueClass, :default=>false
   column :partner_id,                    Integer
   column :posted_date,                   DateTime
@@ -59,6 +61,10 @@ DB.create_table?(:loan) do
   column :paid_date,                     DateTime
   column :image_id,                      Integer
   column :image_template_id,             Integer
+  column :translator_byline,             String
+  column :translator_image,              Integer
+  column :journal_totals_entries,        Integer
+  column :journal_totals_bulkEntries,    Integer
 
 end
 
@@ -124,6 +130,26 @@ DB.create_table?(:borrower) do
   column :pictured,       TrueClass, :default=>false
 end
 
+DB.create_table?(:location) do
+  primary_key :id
+  column :loan_id,        Integer, :index => true
+
+  column :country_code,   String
+  column :country,        String
+  column :town,           String
+  column :geo_level,      String
+  column :geo_pairs,      String
+  column :geo_type,       String
+end
+
+DB.create_table?(:loan_lender) do
+  primary_key :id
+
+  column :loan_id,        Integer, :index => true
+  column :lender_id,      String,  :index => true
+end
+
+
 #########################################################################################################
 
 class Lender < Sequel::Model(:lender)
@@ -153,10 +179,16 @@ end
 class Borrower < Sequel::Model(:borrower)
 end
 
+class Location < Sequel::Model(:location)
+end
+
+class LoanLender < Sequel::Model(:loan_lender)
+end
+
 #########################################################################################################
 
 
-def process_lender(lender)
+def process_lenders(lender)
   model = Lender.new
 
   lender.each do |key, value|
@@ -185,7 +217,7 @@ def process_lender(lender)
   model[:lender_id]
 end
 
-def process_loan(loan)
+def process_loans(loan)
   model = Loan.new
 
   loan.each do |key, value|
@@ -200,11 +232,31 @@ def process_loan(loan)
       value.each do |key2, value2|
         case key2
         when :id, :template_id
-          model[("image_"+key2.to_s).to_sym] = value2.to_s
+          model[(key.to_s+'_'+key2.to_s).to_sym] = value2.to_s
         else
           raise "unexpected key: #{key2} in #{key}"
         end
       end
+    when :translator
+      value.each do |key2, value2|
+        case key2
+        when :byline, :image
+          model[(key.to_s+'_'+key2.to_s).to_sym] = value2.to_s
+        else
+          raise "unexpected key: #{key2} in #{key}"
+        end
+      end if value
+
+    when :journal_totals
+      value.each do |key2, value2|
+        case key2
+        when :entries, :bulkEntries
+          model[(key.to_s+'_'+key2.to_s).to_sym] = value2.to_s
+        else
+          raise "unexpected key: #{key2} in #{key}"
+        end
+      end
+
     when :description
       create_description(value, model[:id])
     when :payments
@@ -213,14 +265,36 @@ def process_loan(loan)
       create_terms(value, model[:id])
     when :borrowers
       create_borrowers(value, model[:id])
+    when :location
+      create_location(value, model[:id])
     else
-      # raise "unexpected key: #{key}"
+      raise "unexpected key: #{key} in loan #{loan}"
     end
   end
 
   model.save
   model[:id]
 end
+
+def process_loans_lenders(loan_lender)
+  loan_id = lender_ids = 0
+  loan_lender.each do |key, value|
+    case key
+    when :id
+      loan_id = value.to_i
+    when :lender_ids
+      lender_ids = value
+    else
+      raise "unexpected key: #{key} in loan_lender #{loan_lender}"
+    end
+  end
+
+  lender_ids.each do |lender_id|
+    LoanLender.new(:loan_id => loan_id, :lender_id => lender_id).save
+  end if loan_id and lender_ids
+end
+
+#########################################################################################################
 
 def create_description(descriptions, loan_id)
   descriptions.each do |key, value|
@@ -326,38 +400,34 @@ def create_borrowers(borrowers, loan_id)
   end
 end
 
-=begin
-
-    {
-      "location": {
-        "country_code": "PE",
-        "country": "Peru",
-        "town": null,
-        "geo": {
-          "level": "country",
-          "pairs": "-10 -76",
-          "type": "point"
-        }
-      },
-
-      "journal_totals": {
-        "entries": 0,
-        "bulkEntries": 00
-      },
-      "translator": {
-        "byline": "Jennifer Day",
-        "image": null
-      }
-    },
-=end
-
+def create_location(location, loan_id)
+  model = Location.new(:loan_id => loan_id)
+  location.each do |key, value|
+    case key
+    when :country_code, :country, :town
+      model[key] = value.to_s
+    when :geo
+      value.each do |key2, value2|
+        case key2
+        when :level, :pairs, :type
+          model[(key.to_s+'_'+key2.to_s).to_sym] = value2.to_s
+        else
+          raise "unexpected key: #{key2} in #{key}"
+        end
+      end
+    else
+      raise "unexpected key: #{key} in location"
+    end
+  end
+  model.save
+end
 
 def process_file(type, name)
   file = File.open(name, "r")
   content = JSON.parse(file.read, symbolize_names: true)
   file.close
 
-  items = content[(type.to_s+"s").to_sym]
+  items = content[type]
   items.each do |item|
     begin
       send("process_"+type.to_s, item)
@@ -382,9 +452,14 @@ def process_files(type, pattern)
   count
 end
 
-# count = process_file(:lender, "data/lenders/500.json")
-# count = process_files(:lender, "data/lenders/50*.json")
+# count = process_file(:lenders, "data/lenders/500.json")
+# count = process_files(:lenders, "data/lenders/50*.json")
 
-count = process_file(:loan, "data/loans/500.json")
+# count = process_file(:loans, "data/loans/500.json")
+# count = process_files(:loans, "data/loans/50*.json")
+
+# count = process_file(:loans_lenders, "data/loans_lenders/50.json")
+count = process_files(:loans_lenders, "data/loans_lenders/5*.json")
+
 
 puts "total_items: #{count}"
