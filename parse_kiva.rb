@@ -5,7 +5,8 @@ DB = Sequel.connect('jdbc:mysql://localhost/kiva?user=root')
 
 DB.drop_table?(:lender)
 DB.drop_table?(:loan)
-DB.drop_table?(:loan_description)
+DB.drop_table?(:description)
+DB.drop_table?(:payment)
 
 DB.create_table?(:lender) do
   column :lender_id,          String, :primary_key => true, :index => true
@@ -29,9 +30,9 @@ DB.create_table?(:loan) do
   column :id,                            Integer, :primary_key => true, :index => true
   column :name,                          String
   column :status,                        String
-  column :funded_amount,                 BigDecimal
-  column :basket_amount,                 BigDecimal
-  column :paid_amount,                   BigDecimal
+  column :funded_amount,                 BigDecimal, :size=>[10, 2]
+  column :basket_amount,                 BigDecimal, :size=>[10, 2]
+  column :paid_amount,                   BigDecimal, :size=>[10, 2]
   column :video,                         String
   column :activity,                      String
   column :sector,                        String
@@ -41,9 +42,9 @@ DB.create_table?(:loan) do
   column :partner_id,                    Integer
   column :posted_date,                   DateTime
   column :planned_expiration_date,       DateTime
-  column :loan_amount,                   BigDecimal
+  column :loan_amount,                   BigDecimal, :size=>[10, 2]
   column :lender_count,                  String
-  column :currency_exchange_loss_amount, BigDecimal
+  column :currency_exchange_loss_amount, BigDecimal, :size=>[10, 2]
   column :bonus_credit_eligibility,      TrueClass, :default=>false
   column :funded_date,                   DateTime
   column :paid_date,                     DateTime
@@ -52,13 +53,28 @@ DB.create_table?(:loan) do
 
 end
 
-DB.create_table?(:loan_description) do
+DB.create_table?(:description) do
   primary_key :id
+  column :loan_id,  Integer, :index => true
 
-  column :loan_id,  Integer
   column :language, String
   column :text,     String, :text=>true
 end
+
+DB.create_table?(:payment) do
+  column :payment_id,                    Integer, :primary_key => true, :index => true
+  column :loan_id,                       Integer, :index => true
+
+  column :amount,                        BigDecimal, :size=>[10, 2]
+  column :local_amount,                  BigDecimal, :size=>[10, 2]
+  column :processed_date,                DateTime
+  column :settlement_date,               DateTime
+  column :rounded_local_amount,          BigDecimal, :size=>[10, 2]
+  column :currency_exchange_loss_amount, BigDecimal
+  column :comment,                       String
+end
+
+#########################################################################################################
 
 class Lender < Sequel::Model(:lender)
   unrestrict_primary_key
@@ -68,7 +84,11 @@ class Loan < Sequel::Model(:loan)
   unrestrict_primary_key
 end
 
-class LoanDescription < Sequel::Model(:loan_description)
+class LoanDescription < Sequel::Model(:description)
+end
+
+class Payment < Sequel::Model(:payment)
+  unrestrict_primary_key
 end
 
 
@@ -82,14 +102,14 @@ def process_lender(lender)
     case key
     when :lender_id, :name, :whereabouts, :country_code, :uid, :member_since, :personal_url, :occupation,
          :loan_because, :occupational_info, :loan_count, :invitee_count, :inviter_id
-      model[key] = value
+      model[key] = value.to_s
     when :image
       value.each do |ikey, ivalue|
         case ikey
         when :id
-          model[:image_id] = ivalue
+          model[:image_id] = ivalue.to_s
         when :template_id
-          model[:image_template_id] = ivalue
+          model[:image_template_id] = ivalue.to_s
         else
           raise "unexpected key: #{ikey.to_s}"
         end
@@ -113,21 +133,23 @@ def process_loan(loan)
          :theme, :use, :delinquent, :partner_id, :posted_date, :planned_expiration_date, :loan_amount,
          :lender_count, :currency_exchange_loss_amount, :bonus_credit_eligibility, :funded_date, :paid_date
 
-      model[key] = value
+      model[key] = value.to_s
 
     when :image
       value.each do |ikey, ivalue|
         case ikey
         when :id
-          model[:image_id] = ivalue
+          model[:image_id] = ivalue.to_s
         when :template_id
-          model[:image_template_id] = ivalue
+          model[:image_template_id] = ivalue.to_s
         else
           raise "unexpected key: #{ikey} in #{key}"
         end
       end
     when :description
-      # create_loan_description(value, model[:id])
+      create_description(value, model[:id])
+    when :payments
+      create_payments(value, model[:id])
     else
       # raise "unexpected key: #{key}"
     end
@@ -137,18 +159,34 @@ def process_loan(loan)
   model[:id]
 end
 
-def create_loan_description(description, loan_id)
-  description.each do |key, value|
+def create_description(descriptions, loan_id)
+  descriptions.each do |key, value|
     case key
     when :texts
       value.each do |ikey, ivalue|
-        LoanDescription.new(:loan_id => loan_id, :language => ikey.to_s, :text => ivalue).save
+        LoanDescription.new(:loan_id => loan_id, :language => ikey.to_s, :text => ivalue.to_s).save
       end
     when :languages
       # ignore
     else
       raise "unexpected key: #{key} in description"
     end
+  end
+end
+
+def create_payments(payments, loan_id)
+  payments.each do |payment|
+    model = Payment.new(:loan_id => loan_id)
+    payment.each do |key, value|
+      case key
+      when :payment_id, :amount, :local_amount, :processed_date, :settlement_date, :rounded_local_amount,
+           :currency_exchange_loss_amount, :comment
+        model[key] = value.to_s
+      else
+        raise "unexpected key: #{key} in payment #{payment}"
+      end
+    end
+    model.save
   end
 end
 
@@ -200,18 +238,6 @@ end
           "currency_exchange_coverage_rate": 0.2
         }
       },
-      "payments": [
-        {
-          "amount": 16.38,
-          "local_amount": 45.19,
-          "processed_date": "2012-01-31T08:00:00Z",
-          "settlement_date": "2012-02-27T08:37:21Z",
-          "rounded_local_amount": 45.95,
-          "currency_exchange_loss_amount": 0,
-          "payment_id": 257395716,
-          "comment": null
-        }
-      ],
       "journal_totals": {
         "entries": 0,
         "bulkEntries": 00
@@ -231,9 +257,16 @@ def process_file(type, name)
 
   items = content[(type.to_s+"s").to_sym]
   items.each do |item|
-    send("process_"+type.to_s, item)
+    begin
+      send("process_"+type.to_s, item)
+    rescue
+      puts "Error in #{name}"
+      #puts content.to_s
+      raise
+    end
     print '.'
   end
+
   puts
   items.count
 end
