@@ -1,22 +1,16 @@
 require 'json'
 require 'sequel'
 
-DO_DROP = true
+EMIT_PLANNED_PAYMENTS = false
 
-
-DB = Sequel.connect('jdbc:mysql://localhost/kiva?user=root')
+# disabled :)
+DO_DROP = false
+DB = Sequel.connect('jdbc:mysql://localhost/kiva__NOT?user=root')
 
 if DO_DROP
-  DB.drop_table?(:lender)
-  DB.drop_table?(:loan)
-  DB.drop_table?(:description)
-  DB.drop_table?(:payment)
-  DB.drop_table?(:local_payment)
-  DB.drop_table?(:scheduled_payment)
-  DB.drop_table?(:terms)
-  DB.drop_table?(:borrower)
-  DB.drop_table?(:location)
-  DB.drop_table?(:loan_lender)
+  [:lender, :loan, :description, :payment, :local_payment, :scheduled_payment, :terms,
+   :borrower, :location, :loan_lender
+  ].each {|table| DB.drop_table?(table)}
 end
 
 DB.create_table?(:lender) do
@@ -41,9 +35,9 @@ DB.create_table?(:loan) do
   column :id,                            Integer, :primary_key => true, :index => true
   column :name,                          String
   column :status,                        String
-  column :funded_amount,                 BigDecimal, :size=>[10, 2]
-  column :basket_amount,                 BigDecimal, :size=>[10, 2]
-  column :paid_amount,                   BigDecimal, :size=>[10, 2]
+  column :funded_amount,                 String #BigDecimal, :size=>[20, 2]
+  column :basket_amount,                 String #BigDecimal, :size=>[20, 2]
+  column :paid_amount,                   String #BigDecimal, :size=>[20, 2]
   column :video,                         String
   column :activity,                      String
   column :sector,                        String
@@ -53,9 +47,9 @@ DB.create_table?(:loan) do
   column :partner_id,                    Integer
   column :posted_date,                   DateTime
   column :planned_expiration_date,       DateTime
-  column :loan_amount,                   BigDecimal, :size=>[10, 2]
+  column :loan_amount,                   String #BigDecimal, :size=>[20, 2]
   column :lender_count,                  String
-  column :currency_exchange_loss_amount, BigDecimal, :size=>[10, 2]
+  column :currency_exchange_loss_amount, String #BigDecimal, :size=>[20, 2]
   column :bonus_credit_eligibility,      TrueClass, :default=>false
   column :funded_date,                   DateTime
   column :paid_date,                     DateTime
@@ -80,12 +74,12 @@ DB.create_table?(:payment) do
   column :payment_id,                    Integer, :primary_key => true, :index => true
   column :loan_id,                       Integer, :index => true
 
-  column :amount,                        BigDecimal, :size=>[10, 2]
-  column :local_amount,                  BigDecimal, :size=>[10, 2]
+  column :amount,                        String #BigDecimal, :size=>[20, 2]
+  column :local_amount,                  String #BigDecimal, :size=>[20, 2]
   column :processed_date,                DateTime
   column :settlement_date,               DateTime
-  column :rounded_local_amount,          BigDecimal, :size=>[10, 2]
-  column :currency_exchange_loss_amount, BigDecimal
+  column :rounded_local_amount,          String #BigDecimal, :size=>[20, 2]
+  column :currency_exchange_loss_amount, String #BigDecimal
   column :comment,                       String, :text=>true
 end
 
@@ -94,7 +88,7 @@ DB.create_table?(:local_payment) do
   column :terms_id,                      Integer, :index => true
 
   column :due_date,                      DateTime
-  column :amount,                        BigDecimal, :size=>[10, 2]
+  column :amount,                        String #BigDecimal, :size=>[20, 2]
 end
 
 DB.create_table?(:scheduled_payment) do
@@ -102,7 +96,7 @@ DB.create_table?(:scheduled_payment) do
   column :terms_id,                      Integer, :index => true
 
   column :due_date,                      DateTime
-  column :amount,                        BigDecimal, :size=>[10, 2]
+  column :amount,                        String #BigDecimal, :size=>[20, 2]
 end
 
 DB.create_table?(:terms) do
@@ -111,13 +105,13 @@ DB.create_table?(:terms) do
 
   column :disbursal_date,                                 DateTime
   column :disbursal_currency,                             String
-  column :disbursal_amount,                               BigDecimal, :size=>[10, 2]
+  column :disbursal_amount,                               String #BigDecimal, :size=>[20, 2]
   column :repayment_interval,                             String
   column :repayment_term,                                 Integer
-  column :loan_amount,                                    BigDecimal, :size=>[10, 2]
+  column :loan_amount,                                    String #BigDecimal, :size=>[20, 2]
   column :loss_liability_nonpayment,                      String
   column :loss_liability_currency_exchange,               String
-  column :loss_liability_currency_exchange_coverage_rate, BigDecimal
+  column :loss_liability_currency_exchange_coverage_rate, String
 end
 
 DB.create_table?(:borrower) do
@@ -211,7 +205,7 @@ def process_lenders(lender)
   end
   raise "odd lender uuid #{lender[:uuid]} for #{lender[:lender_id]}" if lender[:uuid] && lender[:uuid] != lender[:lender_id]
 
-  model.save
+  model.save(:validate => false, :changed => true)
   model[:lender_id]
 end
 
@@ -268,7 +262,7 @@ def process_loans(loan)
     end
   end
 
-  model.save
+  model.save(:validate => false, :changed => true)
   model[:id]
 end
 
@@ -286,7 +280,7 @@ def process_loans_lenders(loan_lender)
   end
 
   lender_ids.each do |lender_id|
-    LoanLender.new(:loan_id => loan_id, :lender_id => lender_id).save
+    LoanLender.new(:loan_id => loan_id, :lender_id => lender_id).save(:validate => false, :changed => true)
   end if loan_id and lender_ids
 end
 
@@ -297,7 +291,7 @@ def create_description(descriptions, loan_id)
     case key
     when :texts
       value.each do |key2, value2|
-        LoanDescription.new(:loan_id => loan_id, :language => key2.to_s, :text => value2.to_s).save
+        LoanDescription.new(:loan_id => loan_id, :language => key2.to_s, :text => value2.to_s).save(:validate => false, :changed => true)
       end
     when :languages
       # ignore
@@ -319,7 +313,7 @@ def create_payments(payments, loan_id)
         raise "unexpected key: #{key} in payment #{payment}"
       end
     end
-    model.save
+    model.save(:validate => false, :changed => true)
   end
 end
 
@@ -334,7 +328,7 @@ def create_local_payments(payments, terms_id)
         raise "unexpected key: #{key} in local_payment #{payment}"
       end
     end
-    model.save
+    model.save(:validate => false, :changed => true)
   end
 end
 
@@ -349,22 +343,22 @@ def create_scheduled_payments(payments, terms_id)
         raise "unexpected key: #{key} in scheduled_payment #{payment}"
       end
     end
-    model.save
+    model.save(:validate => false, :changed => true)
   end
 end
 
 def create_terms(terms, loan_id)
   # eager save to generate autoincrement :id used below
-  model = Terms.new(:loan_id => loan_id).save
+  model = Terms.new(:loan_id => loan_id).save(:validate => false, :changed => true)
   terms.each do |key, value|
     case key
     when :disbursal_date, :disbursal_currency, :disbursal_amount, :repayment_interval,
          :repayment_term, :loan_amount
       model[key] = value.to_s
     when :local_payments
-      create_local_payments(value, model[:id])
+      create_local_payments(value, model[:id]) if EMIT_PLANNED_PAYMENTS
     when :scheduled_payments
-      create_scheduled_payments(value, model[:id])
+      create_scheduled_payments(value, model[:id]) if EMIT_PLANNED_PAYMENTS
     when :loss_liability
       value.each do |key2, value2|
         case key2
@@ -378,7 +372,7 @@ def create_terms(terms, loan_id)
       raise "unexpected key: #{key} in description"
     end
   end
-  model.save
+  model.save(:validate => false, :changed => true)
 end
 
 def create_borrowers(borrowers, loan_id)
@@ -392,7 +386,7 @@ def create_borrowers(borrowers, loan_id)
         raise "unexpected key: #{key} in borrower"
       end
     end
-    model.save
+    model.save(:validate => false, :changed => true)
   end
 end
 
@@ -415,7 +409,7 @@ def create_location(location, loan_id)
       raise "unexpected key: #{key} in location"
     end
   end
-  model.save
+  model.save(:validate => false, :changed => true)
 end
 
 def process_file(type, name)
@@ -424,15 +418,17 @@ def process_file(type, name)
   file.close
 
   items = content[type]
-  items.each do |item|
-    begin
-      send("process_"+type.to_s, item)
-    rescue
-      puts "Error in #{name}"
-      #puts content.to_s
-      raise
+  DB.transaction do
+    items.each do |item|
+      begin
+        send("process_"+type.to_s, item)
+      rescue
+        puts "Error in #{name}"
+        #puts content.to_s
+        raise
+      end
+      print '.'
     end
-    print '.'
   end
 
   puts
@@ -444,6 +440,7 @@ def process_files(type, pattern)
   Dir[pattern].each do |fname|
     puts "\n#{fname}"
     count += process_file(type, fname)
+    puts "items: #{count}"
   end
   count
 end
@@ -455,6 +452,7 @@ end
 
 # count = process_file(:loans, "data/loans/500.json")
 # count = process_files(:loans, "data/loans/50*.json")
+# count = process_files(:loans, "data/loans/1227.json")
 
 # count = process_file(:loans_lenders, "data/loans_lenders/50.json")
 # count = process_files(:loans_lenders, "data/loans_lenders/5*.json")
