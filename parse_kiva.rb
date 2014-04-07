@@ -34,9 +34,9 @@ def do_create_tables
     column :id,                            Integer, :primary_key => true, :index => true
     column :name,                          String
     column :status,                        String
-    column :funded_amount,                 String #BigDecimal, :size=>[20, 2]
-    column :basket_amount,                 String #BigDecimal, :size=>[20, 2]
-    column :paid_amount,                   String #BigDecimal, :size=>[20, 2]
+    column :funded_amount,                 BigDecimal, :size=>[20, 2]
+    column :basket_amount,                 BigDecimal, :size=>[20, 2]
+    column :paid_amount,                   BigDecimal, :size=>[20, 2]
     column :video,                         String
     column :activity,                      String
     column :sector,                        String
@@ -46,9 +46,9 @@ def do_create_tables
     column :partner_id,                    Integer
     column :posted_date,                   DateTime
     column :planned_expiration_date,       DateTime
-    column :loan_amount,                   String #BigDecimal, :size=>[20, 2]
+    column :loan_amount,                   BigDecimal, :size=>[20, 2]
     column :lender_count,                  String
-    column :currency_exchange_loss_amount, String #BigDecimal, :size=>[20, 2]
+    column :currency_exchange_loss_amount, BigDecimal, :size=>[20, 2]
     column :bonus_credit_eligibility,      TrueClass, :default=>false
     column :funded_date,                   DateTime
     column :paid_date,                     DateTime
@@ -73,12 +73,12 @@ def do_create_tables
     column :payment_id,                    Integer, :primary_key => true, :index => true
     column :loan_id,                       Integer, :index => true
 
-    column :amount,                        String #BigDecimal, :size=>[20, 2]
-    column :local_amount,                  String #BigDecimal, :size=>[20, 2]
+    column :amount,                        BigDecimal, :size=>[20, 2]
+    column :local_amount,                  BigDecimal, :size=>[20, 2]
     column :processed_date,                DateTime
     column :settlement_date,               DateTime
-    column :rounded_local_amount,          String #BigDecimal, :size=>[20, 2]
-    column :currency_exchange_loss_amount, String #BigDecimal
+    column :rounded_local_amount,          BigDecimal, :size=>[20, 2]
+    column :currency_exchange_loss_amount, BigDecimal, :size=>[20, 2]
     column :comment,                       String, :text=>true
   end
 
@@ -87,16 +87,16 @@ def do_create_tables
     column :terms_id,                      Integer, :index => true
 
     column :due_date,                      DateTime
-    column :amount,                        String #BigDecimal, :size=>[20, 2]
-  end
+    column :amount,                        BigDecimal, :size=>[20, 2]
+  end if EMIT_PLANNED_PAYMENTS
 
   DB.create_table?(:scheduled_payment) do
     primary_key :id
     column :terms_id,                      Integer, :index => true
 
     column :due_date,                      DateTime
-    column :amount,                        String #BigDecimal, :size=>[20, 2]
-  end
+    column :amount,                        BigDecimal, :size=>[20, 2]
+  end if EMIT_PLANNED_PAYMENTS
 
   DB.create_table?(:terms) do
     primary_key :id
@@ -104,10 +104,10 @@ def do_create_tables
 
     column :disbursal_date,                                 DateTime
     column :disbursal_currency,                             String
-    column :disbursal_amount,                               String #BigDecimal, :size=>[20, 2]
+    column :disbursal_amount,                               BigDecimal, :size=>[20, 2]
     column :repayment_interval,                             String
     column :repayment_term,                                 Integer
-    column :loan_amount,                                    String #BigDecimal, :size=>[20, 2]
+    column :loan_amount,                                    BigDecimal, :size=>[20, 2]
     column :loss_liability_nonpayment,                      String
     column :loss_liability_currency_exchange,               String
     column :loss_liability_currency_exchange_coverage_rate, String
